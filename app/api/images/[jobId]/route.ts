@@ -9,7 +9,7 @@ export async function GET(
   const { jobId } = await params
 
   try {
-    const { state, resultUrls } = await pollTask(jobId)
+    const { state, resultUrls, failReason } = await pollTask(jobId)
 
     if (state === 'success' && resultUrls.length > 0) {
       const rawUrl = resultUrls[0]
@@ -19,7 +19,10 @@ export async function GET(
     }
 
     if (state === 'fail') {
-      return NextResponse.json({ status: 'failed' })
+      return NextResponse.json({
+        status: 'failed',
+        reason: failReason ?? 'Kie.ai reported image generation failure (no reason given)',
+      })
     }
 
     return NextResponse.json({ status: 'processing' })

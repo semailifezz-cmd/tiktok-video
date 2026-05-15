@@ -57,15 +57,35 @@ export async function pollTask(taskId: string): Promise<PollResult> {
     try {
       const parsed = JSON.parse(task.resultJson)
       resultUrls = parsed.resultUrls ?? []
-      if (parsed.errorMsg) failReason = parsed.errorMsg
-      if (parsed.error) failReason = parsed.error
+      // Surface any error field from resultJson
+      failReason =
+        parsed.errorMsg ||
+        parsed.error ||
+        parsed.failReason ||
+        parsed.message ||
+        parsed.reason ||
+        undefined
     } catch {
-      // non-critical
+      // resultJson is not valid JSON — use raw value as the error message
+      if (task.state === 'fail') failReason = `resultJson parse error: ${String(task.resultJson).slice(0, 200)}`
     }
   }
 
-  if (!failReason && task.errorMsg) failReason = task.errorMsg
-  if (!failReason && task.state === 'fail') failReason = `Task ${taskId} reported state=fail (no reason provided)`
+  // Fall back to top-level task fields
+  if (!failReason) {
+    failReason =
+      task.errorMsg ||
+      task.failReason ||
+      task.message ||
+      task.reason ||
+      task.error ||
+      undefined
+  }
+
+  // Final fallback: include the full raw task object so nothing is silently swallowed
+  if (!failReason && task.state === 'fail') {
+    failReason = `Kie.ai state=fail (no reason provided). Raw task: ${JSON.stringify(task).slice(0, 400)}`
+  }
 
   return { state: task.state as KieState, resultUrls, failReason }
 }

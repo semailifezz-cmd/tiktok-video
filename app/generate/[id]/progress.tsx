@@ -290,9 +290,12 @@ export default function Progress({ id }: { id: string }) {
         for (let attempt = 0; attempt < 40 && !url; attempt++) {
           await sleep(3000)
           const pollRes = await fetch(`/api/images/${jobId}`)
-          const { status, image_url } = await pollRes.json()
-          if (status === 'done' && image_url) url = image_url
-          else if (status === 'failed') throw new Error(`Image failed for "${asset.name}"`)
+          const pollData = await pollRes.json()
+          if (pollData.status === 'done' && pollData.image_url) {
+            url = pollData.image_url
+          } else if (pollData.status === 'failed') {
+            throw new Error(`Image failed for "${asset.name}": ${pollData.reason ?? 'no reason returned'}`)
+          }
         }
 
         if (url) {
