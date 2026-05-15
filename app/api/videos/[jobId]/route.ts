@@ -1,0 +1,29 @@
+import { NextRequest, NextResponse } from 'next/server'
+import { pollTask } from '@/lib/kie'
+import { persistUrl } from '@/lib/blob'
+
+export async function GET(
+  _req: NextRequest,
+  { params }: { params: Promise<{ jobId: string }> }
+) {
+  const { jobId } = await params
+
+  try {
+    const { state, resultUrls, failReason } = await pollTask(jobId)
+
+    if (state === 'success' && resultUrls.length > 0) {
+      const rawUrl = resultUrls[0]
+      const filename = `videos/${jobId}.mp4`
+      const url = await persistUrl(rawUrl, filename)
+      return NextResponse.json({ status: 'done', url })
+    }
+
+    if (state === 'fail') {
+      return NextResponse.json({ status: 'failed', reason: failReason ?? 'Kie.ai reported failure (no reason given)' })
+    }
+
+    return NextResponse.json({ status: 'processing' })
+  } catch (err) {
+    return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 })
+  }
+}
