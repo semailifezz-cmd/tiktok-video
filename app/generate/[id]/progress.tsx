@@ -2,9 +2,9 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
-import type { UniversePrompt, SeriesBible, EpisodeScript, ScenePrompt } from '@/lib/types'
-import { injectRefUrls, buildContinuityMemo, sleep } from '@/lib/workflow'
-import { upsertSeriesEntry, getSeriesEntry } from '@/lib/store'
+import type { UniversePrompt, SeriesBible, EpisodeScript, ScenePrompt, EpisodeOutline } from '@/lib/types'
+import { injectRefUrls, buildContinuityMemo, buildVideoPrompt, sleep } from '@/lib/workflow'
+import { upsertSeriesEntry, getSeriesEntry, getSeriesResult } from '@/lib/store'
 
 const PHASES = [
   { id: 1, name: 'Series Bible Generation', desc: 'Gemini designs fruit characters, venues & episode outlines' },
@@ -22,6 +22,12 @@ interface PhaseState {
   status: PhaseStatus
   progress: number
   detail: string
+}
+
+// Reads body as text first so JSON.parse errors never hide the real message
+async function tryJson(res: Response): Promise<any> {
+  const text = await res.text()
+  try { return JSON.parse(text) } catch { return { error: text.slice(0, 500) || `HTTP ${res.status}` } }
 }
 
 async function downloadVideo(url: string, filename: string) {
@@ -180,7 +186,7 @@ function SceneCard({ scene }: { scene: ScenePrompt }) {
 
       <div className="border-t border-zinc-700/40 pt-3">
         <p className="text-[10px] font-mono text-zinc-600 uppercase tracking-wider mb-1.5">Video Prompt</p>
-        <p className="text-xs text-zinc-400 leading-relaxed">{scene.raw_prompt}</p>
+        <p className="text-xs text-zinc-400 leading-relaxed">{scene.final_prompt ?? buildVideoPrompt(scene)}</p>
       </div>
     </div>
   )
@@ -238,92 +244,192 @@ export default function Progress({ id }: { id: string }) {
 
   const runWorkflow = async (form: UniversePrompt) => {
     try {
-      // ── Phase 1: Series Bible ──────────────────────────────────────────
-      setPhase(0, 'running', 'Calling Gemini to design fruit characters and episode outlines…')
+      const cont = (form as any)._continuation as { source_id: string; ep_num: number } | undefined
 
-      const bibleRes = await fetch('/api/bible', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(form),
-      })
-      const bibleData = await bibleRes.json()
-      if (bibleData.error) throw new Error(bibleData.error)
+      let currentBible!: SeriesBible
+      let newRefImages: Record<string, string> = {}
+      let episodesToProcess: EpisodeOutline[] = []
 
-      setBible(bibleData)
-      setPhase(
-        0, 'done',
-        `${bibleData.characters.length} fruit characters · ${bibleData.venues.length} venues · ${bibleData.episodes.length} episodes`,
-        100
-      )
+      if (cont) {
+        // ── CONTINUATION: reuse existing bible + images ─────────────────────
+        const original = getSeriesResult(cont.source_id)
+        if (!original) throw new Error('Original series data not found in browser storage. Please open the original series first, then try Add Episode again.')
 
-      // ── Phase 2: Asset DB ─────────────────────────────────────────────
-      setPhase(1, 'running', 'Structuring asset database…')
-      await sleep(400)
-      const totalAssets = bibleData.characters.length + bibleData.venues.length + bibleData.props.length
-      setPhase(1, 'done', `${totalAssets} assets indexed — Characters, Venues, Props, Episode_Outline`, 100)
+        currentBible = original.bible
+        newRefImages = { ...original.refImages }
 
-      // ── Phase 3: Reference Images ──────────────────────────────────────
-      const assetList = [
-        ...bibleData.characters.map((c: SeriesBible['characters'][0]) => ({ name: c.name, type: 'character', prompt: c.image_prompt })),
-        ...bibleData.venues.map((v: SeriesBible['venues'][0]) => ({ name: v.location_name, type: 'venue', prompt: v.image_prompt })),
-        ...bibleData.props.map((p: SeriesBible['props'][0]) => ({ name: p.prop_name, type: 'prop', prompt: p.image_prompt })),
-      ]
+        setPhase(0, 'done', `Bible reused — "${currentBible.series_title}" · ${currentBible.episodes.length} previous episode${currentBible.episodes.length !== 1 ? 's' : ''}`, 100)
+        setBible(currentBible)
+        setRefImages(newRefImages)
+        await sleep(250)
+        setPhase(1, 'done', 'Asset database reused from existing series', 100)
+        await sleep(250)
+        setPhase(2, 'done', `${Object.keys(newRefImages).length} reference images reused`, 100)
+        await sleep(250)
 
-      const newRefImages: Record<string, string> = {}
+        // Generate new episode outline as the first step of Phase 4
+        setPhase(3, 'running', `Generating Episode ${cont.ep_num} outline…`)
+        const lastEp = currentBible.episodes.at(-1)
+        const contMemo = lastEp
+          ? `Episode ${lastEp.ep_num}: "${lastEp.title}" — ${lastEp.summary}. Characters featured: ${lastEp.characters_featured.join(', ')}.`
+          : ''
 
-      for (let i = 0; i < assetList.length; i++) {
-        const asset = assetList[i]
-        setPhase(2, 'running', `Generating Pixar 3D ${asset.type}: "${asset.name}" (${i + 1} / ${assetList.length})`, (i / assetList.length) * 100)
-
-        const submitRes = await fetch('/api/images', {
+        const outlineRes = await fetch('/api/episode-outline', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ prompt: asset.prompt }),
+          body: JSON.stringify({ bible: currentBible, episodeNum: cont.ep_num, formula: form.episode_formula, continuityMemo: contMemo }),
         })
-        if (!submitRes.ok) {
-          const err = await submitRes.json()
-          throw new Error(err.error ?? 'Image submission failed')
+        if (!outlineRes.ok) {
+          const err = await outlineRes.json()
+          throw new Error(err.error ?? 'Episode outline generation failed')
         }
-        const { jobId } = await submitRes.json()
+        const outline: EpisodeOutline = await outlineRes.json()
+        if ((outline as any).error) throw new Error((outline as any).error)
 
-        let url = ''
-        for (let attempt = 0; attempt < 40 && !url; attempt++) {
+        currentBible = { ...currentBible, episodes: [...currentBible.episodes, outline] }
+        setBible(currentBible)
+        episodesToProcess = [outline]
+
+      } else {
+        // ── FULL GENERATION ────────────────────────────────────────────────
+
+        // Phase 1: Series Bible
+        setPhase(0, 'running', 'Calling Gemini to design fruit characters and episode outlines…')
+        const bibleRes = await fetch('/api/bible', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(form),
+        })
+        const bibleJson = await bibleRes.json()
+        if (bibleJson.error) throw new Error(bibleJson.error)
+        currentBible = bibleJson
+        setBible(currentBible)
+        setPhase(0, 'done', `${currentBible.characters.length} fruit characters · ${currentBible.venues.length} venues · ${currentBible.episodes.length} episodes`, 100)
+
+        // Phase 2: Asset DB
+        setPhase(1, 'running', 'Structuring asset database…')
+        await sleep(400)
+        const totalAssets = currentBible.characters.length + currentBible.venues.length + currentBible.props.length
+        setPhase(1, 'done', `${totalAssets} assets indexed — Characters, Venues, Props, Episode_Outline`, 100)
+
+        // Phase 3: Reference Images — all submitted in parallel, polled together
+        const assetList = [
+          ...currentBible.characters.map((c: SeriesBible['characters'][0]) => ({ name: c.name, type: 'character', prompt: c.image_prompt })),
+          ...currentBible.venues.map((v: SeriesBible['venues'][0]) => ({ name: v.location_name, type: 'venue', prompt: v.image_prompt })),
+          ...currentBible.props.map((p: SeriesBible['props'][0]) => ({ name: p.prop_name, type: 'prop', prompt: p.image_prompt })),
+        ]
+        type AssetItem = typeof assetList[0]
+
+        const IMG_TOTAL_TIMEOUT_MS = 7 * 60 * 1000
+        const MAX_IMG_RETRIES = 3
+        const imgDeadline = Date.now() + IMG_TOTAL_TIMEOUT_MS
+        const imgRetryCount = new Map<string, number>()
+
+        // Submit all jobs in parallel
+        setPhase(2, 'running', `Submitting ${assetList.length} image jobs in parallel…`, 0)
+        const submitResults = await Promise.allSettled(
+          assetList.map(async (asset) => {
+            const res = await fetch('/api/images', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ prompt: asset.prompt }),
+            })
+            const body = await tryJson(res)
+            if (!res.ok) throw new Error(body.error ?? `Image submit HTTP ${res.status}`)
+            return { asset, jobId: body.jobId } as { asset: AssetItem; jobId: string }
+          })
+        )
+
+        let pendingPolls: { asset: AssetItem; jobId: string }[] = []
+        for (const r of submitResults) {
+          if (r.status === 'fulfilled') pendingPolls.push(r.value)
+        }
+
+        // Poll all in parallel; retry only failed ones; stop at 7-min deadline
+        while (pendingPolls.length > 0 && Date.now() < imgDeadline) {
           await sleep(3000)
-          const pollRes = await fetch(`/api/images/${jobId}`)
-          const pollData = await pollRes.json()
-          if (pollData.status === 'done' && pollData.image_url) {
-            url = pollData.image_url
-          } else if (pollData.status === 'failed') {
-            throw new Error(`Image failed for "${asset.name}": ${pollData.reason ?? 'no reason returned'}`)
+
+          const pollResults = await Promise.allSettled(
+            pendingPolls.map(async (item) => {
+              const res = await fetch(`/api/images/${item.jobId}`)
+              const data = await tryJson(res)
+              return { ...item, data }
+            })
+          )
+
+          const nextPolls: typeof pendingPolls = []
+          const toResubmit: AssetItem[] = []
+
+          for (const r of pollResults) {
+            if (r.status === 'rejected') continue
+            const { asset, data } = r.value
+
+            if (data.status === 'done' && data.image_url) {
+              newRefImages[asset.name] = data.image_url
+              setRefImages(prev => ({ ...prev, [asset.name]: data.image_url }))
+            } else if (data.status === 'failed') {
+              const tries = (imgRetryCount.get(asset.name) ?? 0) + 1
+              imgRetryCount.set(asset.name, tries)
+              if (tries <= MAX_IMG_RETRIES && Date.now() < imgDeadline) {
+                toResubmit.push(asset)
+              }
+            } else {
+              nextPolls.push(r.value)
+            }
           }
+
+          // Resubmit failed assets
+          if (toResubmit.length > 0 && Date.now() < imgDeadline) {
+            const resubmitResults = await Promise.allSettled(
+              toResubmit.map(async (asset) => {
+                const res = await fetch('/api/images', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ prompt: asset.prompt }),
+                })
+                const body = await tryJson(res)
+                if (!res.ok) throw new Error(body.error ?? `Image resubmit HTTP ${res.status}`)
+                return { asset, jobId: body.jobId } as { asset: AssetItem; jobId: string }
+              })
+            )
+            for (const r of resubmitResults) {
+              if (r.status === 'fulfilled') nextPolls.push(r.value)
+            }
+          }
+
+          pendingPolls = nextPolls
+
+          const done = Object.keys(newRefImages).length
+          const total = assetList.length
+          const remaining = Math.ceil((imgDeadline - Date.now()) / 1000)
+          setPhase(2, 'running',
+            `${done}/${total} images ready · ${pendingPolls.length} generating · ${remaining}s left`,
+            (done / total) * 100
+          )
         }
 
-        if (url) {
-          newRefImages[asset.name] = url
-          setRefImages(prev => ({ ...prev, [asset.name]: url }))
-        }
+        const imgCount = Object.keys(newRefImages).length
+        setPhase(2, 'done', `${imgCount}/${assetList.length} Pixar-style reference images generated`, 100)
+        episodesToProcess = currentBible.episodes
       }
-
-      setPhase(2, 'done', `${Object.keys(newRefImages).length} Pixar-style reference images generated`, 100)
 
       // ── Phase 4: Scene Scripts ─────────────────────────────────────────
       const allScripts: EpisodeScript[] = []
       let prevMemo = ''
 
-      for (let i = 0; i < bibleData.episodes.length; i++) {
-        const episode = bibleData.episodes[i]
-        setPhase(3, 'running', `Episode ${episode.ep_num}: "${episode.title}" (${i + 1} / ${bibleData.episodes.length})`, (i / bibleData.episodes.length) * 100)
+      for (let i = 0; i < episodesToProcess.length; i++) {
+        const episode = episodesToProcess[i]
+        setPhase(3, 'running', `Episode ${episode.ep_num}: "${episode.title}" (${i + 1} / ${episodesToProcess.length})`, (i / episodesToProcess.length) * 100)
 
         const scriptRes = await fetch('/api/scripts', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ episode, bible: bibleData, formula: form.episode_formula, prevMemo }),
+          body: JSON.stringify({ episode, bible: currentBible, formula: form.episode_formula, prevMemo }),
         })
         if (!scriptRes.ok) {
           const err = await scriptRes.json()
           throw new Error(err.error ?? 'Script generation failed')
         }
-
         const script = await scriptRes.json()
         if (script.error) throw new Error(script.error)
         allScripts.push(script)
@@ -332,86 +438,175 @@ export default function Progress({ id }: { id: string }) {
       }
 
       const totalScenes = allScripts.reduce((n, s) => n + s.scenes.length, 0)
-      setPhase(3, 'done', `${totalScenes} scene prompts written across ${allScripts.length} episodes`, 100)
+      setPhase(3, 'done', `${totalScenes} scene prompts written across ${allScripts.length} episode${allScripts.length !== 1 ? 's' : ''}`, 100)
 
       // ── Phase 5: Reference URL Injection ──────────────────────────────
       setPhase(4, 'running', 'Assembling final video prompts with Pixar character reference images…')
-      const injectedScripts = injectRefUrls(allScripts, newRefImages, bibleData)
+      const injectedScripts = injectRefUrls(allScripts, newRefImages, currentBible)
       await sleep(300)
       setPhase(4, 'done', `${injectedScripts.flatMap(s => s.scenes).length} prompts assembled`, 100)
 
-      // ── Phase 6: Video Generation ──────────────────────────────────────
+      // ── Phase 6: Video Generation — submit all in parallel, poll every 30s
       const allScenes = injectedScripts.flatMap(s => s.scenes)
       const newVideoUrls: Record<string, string> = {}
+      const VID_TOTAL_TIMEOUT_MS = 30 * 60 * 1000
+      const MAX_VID_RETRIES = 5
+      const vidDeadline = Date.now() + VID_TOTAL_TIMEOUT_MS
+      const vidRetryCount = new Map<string, number>()
 
-      for (let i = 0; i < allScenes.length; i++) {
-        const scene = allScenes[i]
-        const key = `ep${scene.ep_num}_clip${scene.clip_num}`
-        const deadline = Date.now() + 10 * 60 * 1000
-        let videoUrl = ''
-        let lastFailReason = ''
-        let attemptNum = 0
+      type VideoItem = { scene: ScenePrompt; key: string; jobId: string }
 
-        while (Date.now() < deadline && !videoUrl) {
-          attemptNum++
-          const remaining = Math.round((deadline - Date.now()) / 1000)
-          setPhase(
-            5, 'running',
-            `Clip ${i + 1} / ${allScenes.length} — Ep ${scene.ep_num} · Clip ${scene.clip_num} · Attempt ${attemptNum} (${remaining}s left)`,
-            (i / allScenes.length) * 100,
-          )
-
-          const submitRes = await fetch('/api/videos', {
+      // Submit all jobs in parallel
+      setPhase(5, 'running', `Submitting ${allScenes.length} video jobs in parallel…`, 0)
+      const vidSubmitResults = await Promise.allSettled(
+        allScenes.map(async (scene) => {
+          const key = `ep${scene.ep_num}_clip${scene.clip_num}`
+          const res = await fetch('/api/videos', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               prompt: scene.final_prompt,
               image_urls: scene.grok_ref_images ?? [],
-              duration: 15, // 15s per clip; API caps at 30s — 4 clips × 15s = 60s episode
+              duration: 15,
               aspect_ratio: '9:16',
               resolution: '720p',
             }),
           })
-          if (!submitRes.ok) {
-            const err = await submitRes.json()
-            throw new Error(err.error ?? `Video submission failed for ${key}`)
-          }
-          const { jobId } = await submitRes.json()
+          const body = await tryJson(res)
+          if (!res.ok) throw new Error(body.error ?? `Video submit HTTP ${res.status}`)
+          return { scene, key, jobId: body.jobId } as VideoItem
+        })
+      )
 
-          while (Date.now() < deadline && !videoUrl) {
-            await sleep(5000)
-            const pollRes = await fetch(`/api/videos/${jobId}`)
-            const { status, url, reason } = await pollRes.json()
-            if (status === 'done' && url) {
-              videoUrl = url
-            } else if (status === 'failed') {
-              lastFailReason = reason ?? 'Kie.ai reported state=fail (no reason provided)'
-              break
+      let vidPendingPolls: VideoItem[] = []
+      for (let i = 0; i < vidSubmitResults.length; i++) {
+        const r = vidSubmitResults[i]
+        if (r.status === 'fulfilled') {
+          vidPendingPolls.push(r.value)
+        } else {
+          const scene = allScenes[i]
+          const key = `ep${scene.ep_num}_clip${scene.clip_num}`
+          const msg = r.reason instanceof Error ? r.reason.message : String(r.reason)
+          setVideoErrors(prev => ({ ...prev, [key]: `Submit failed: ${msg}` }))
+        }
+      }
+
+      // Poll every 30s; retry failed jobs; stop at deadline
+      while (vidPendingPolls.length > 0 && Date.now() < vidDeadline) {
+        await sleep(30000)
+
+        const pollResults = await Promise.allSettled(
+          vidPendingPolls.map(async (item) => {
+            const res = await fetch(`/api/videos/${item.jobId}`)
+            const data = await tryJson(res)
+            return { ...item, data }
+          })
+        )
+
+        const nextPolls: VideoItem[] = []
+        const toResubmit: ScenePrompt[] = []
+
+        for (let i = 0; i < pollResults.length; i++) {
+          const r = pollResults[i]
+          if (r.status === 'rejected') {
+            nextPolls.push(vidPendingPolls[i])  // network blip — retry next round
+            continue
+          }
+          const { scene, key, data } = r.value
+
+          if (data.status === 'done' && data.url) {
+            newVideoUrls[key] = data.url
+            setVideoUrls(prev => ({ ...prev, [key]: data.url }))
+          } else if (data.status === 'failed') {
+            const tries = (vidRetryCount.get(key) ?? 0) + 1
+            vidRetryCount.set(key, tries)
+            if (tries <= MAX_VID_RETRIES && Date.now() < vidDeadline) {
+              // From the 2nd retry onward, drop reference image URLs — tempfile.aiquickdraw.com
+              // URLs expire quickly, causing image-to-video to 500 on every attempt.
+              // Falling back to text-to-video removes the URL dependency entirely.
+              toResubmit.push(tries >= 2 ? { ...scene, grok_ref_images: [] } : scene)
+            } else {
+              setVideoErrors(prev => ({ ...prev, [key]: `Failed after ${tries} attempt${tries !== 1 ? 's' : ''}: ${data.reason ?? 'unknown'}` }))
+            }
+          } else {
+            nextPolls.push(r.value)
+          }
+        }
+
+        // Resubmit failed jobs — 30s countdown first so the model has time to clear
+        if (toResubmit.length > 0 && Date.now() < vidDeadline) {
+          for (let w = 30; w > 0 && Date.now() < vidDeadline; w--) {
+            const done = Object.keys(newVideoUrls).length
+            const total = allScenes.length
+            const remaining = Math.ceil((vidDeadline - Date.now()) / 1000)
+            setPhase(5, 'running',
+              `${done}/${total} ready · ${toResubmit.length} retrying in ${w}s · ${nextPolls.length} still generating · ${remaining}s left`,
+              (done / total) * 100
+            )
+            await sleep(1000)
+          }
+
+          if (Date.now() < vidDeadline) {
+            const resubResults = await Promise.allSettled(
+              toResubmit.map(async (scene) => {
+                const key = `ep${scene.ep_num}_clip${scene.clip_num}`
+                const res = await fetch('/api/videos', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    prompt: scene.final_prompt,
+                    image_urls: scene.grok_ref_images ?? [],
+                    duration: 15,
+                    aspect_ratio: '9:16',
+                    resolution: '720p',
+                  }),
+                })
+                const body = await tryJson(res)
+                if (!res.ok) throw new Error(body.error ?? `Video resubmit HTTP ${res.status}`)
+                return { scene, key, jobId: body.jobId } as VideoItem
+              })
+            )
+            for (let i = 0; i < resubResults.length; i++) {
+              const r = resubResults[i]
+              if (r.status === 'fulfilled') {
+                nextPolls.push(r.value)
+              } else {
+                const scene = toResubmit[i]
+                const key = `ep${scene.ep_num}_clip${scene.clip_num}`
+                setVideoErrors(prev => ({ ...prev, [key]: 'Resubmit failed' }))
+              }
             }
           }
         }
 
-        if (!videoUrl) {
-          const msg = lastFailReason || 'Timed out after 10 minutes — check credits at kie.ai'
-          setVideoErrors(prev => ({ ...prev, [key]: msg }))
-          throw new Error(`${key} failed after ${attemptNum} attempt(s) — ${msg}`)
-        }
+        vidPendingPolls = nextPolls
 
-        newVideoUrls[key] = videoUrl
-        setVideoUrls(prev => ({ ...prev, [key]: videoUrl }))
+        const done = Object.keys(newVideoUrls).length
+        const total = allScenes.length
+        const remaining = Math.ceil((vidDeadline - Date.now()) / 1000)
+        setPhase(5, 'running',
+          `${done}/${total} clips ready · ${vidPendingPolls.length} generating · ${remaining}s left`,
+          (done / total) * 100
+        )
       }
 
-      setPhase(5, 'done', `${Object.keys(newVideoUrls).length} clips generated`, 100)
+      // Any jobs still pending at deadline are timed out
+      for (const item of vidPendingPolls) {
+        setVideoErrors(prev => ({ ...prev, [item.key]: 'Timed out after 30 minutes' }))
+      }
+
+      setPhase(5, 'done', `${Object.keys(newVideoUrls).length}/${allScenes.length} clips generated`, 100)
 
       // ── Phase 7: Episode Stitching ─────────────────────────────────────
-      setPhase(6, 'running', 'Stitching 4 × 15s clips into 60-second episodes…')
+      const epLabel = episodesToProcess.length === 1 ? '1 episode' : `${episodesToProcess.length} episodes`
+      setPhase(6, 'running', cont ? `Finalising Episode ${cont.ep_num}…` : 'Stitching 4 × 15s clips into 60-second episodes…')
       await sleep(800)
-      setPhase(6, 'done', `${bibleData.episodes.length} episodes ready`, 100)
+      setPhase(6, 'done', `${epLabel} ready`, 100)
 
       // ── Save results ───────────────────────────────────────────────────
       localStorage.setItem(`tiktok_${id}_result`, JSON.stringify({
         videoUrls: newVideoUrls,
-        bible: bibleData,
+        bible: currentBible,
         refImages: newRefImages,
         scripts: allScripts,
       }))
@@ -419,12 +614,12 @@ export default function Progress({ id }: { id: string }) {
       const existing = getSeriesEntry(id)
       upsertSeriesEntry({
         id,
-        title: bibleData.series_title,
-        genre: bibleData.genre,
+        title: currentBible.series_title,
+        genre: currentBible.genre,
         createdAt: existing?.createdAt ?? new Date().toISOString(),
         status: 'complete',
         clipCount: Object.keys(newVideoUrls).length,
-        episodeCount: bibleData.episodes.length,
+        episodeCount: episodesToProcess.length,
       })
 
       setIsComplete(true)
@@ -506,6 +701,39 @@ export default function Progress({ id }: { id: string }) {
                 className="text-sm bg-green-800 hover:bg-green-700 text-green-100 px-5 py-2.5 rounded-lg font-semibold transition-colors"
               >
                 ↓ Download All {totalClips} Clips
+              </button>
+              <button
+                onClick={() => {
+                  if (!bible) return
+                  const newId = crypto.randomUUID()
+                  const contData = {
+                    series_title: bible.series_title,
+                    genre: bible.genre,
+                    setting_era: formData?.setting_era ?? '',
+                    core_conflict: formData?.core_conflict ?? '',
+                    tone: formData?.tone ?? 'Warm, cinematic, Pixar-style 3D animation',
+                    main_characters: formData?.main_characters ?? 'LLM to design (3–5)',
+                    total_episodes: 1,
+                    episode_length_s: 60,
+                    clip_length_s: 15,
+                    episode_formula: formData?.episode_formula ?? '',
+                    _continuation: { source_id: id, ep_num: bible.episodes.length + 1 },
+                  }
+                  localStorage.setItem(`tiktok_${newId}`, JSON.stringify(contData))
+                  upsertSeriesEntry({
+                    id: newId,
+                    title: `${bible.series_title} — Ep ${bible.episodes.length + 1}`,
+                    genre: bible.genre,
+                    createdAt: new Date().toISOString(),
+                    status: 'generating',
+                    clipCount: 0,
+                    episodeCount: 0,
+                  })
+                  router.push(`/generate/${newId}`)
+                }}
+                className="text-sm bg-pink-900/40 hover:bg-pink-900/60 border border-pink-800/60 text-pink-300 px-5 py-2.5 rounded-lg transition-colors"
+              >
+                + Add Episode
               </button>
               <button
                 onClick={() => router.push('/new')}
@@ -761,9 +989,9 @@ export default function Progress({ id }: { id: string }) {
                             }
                             if (err) {
                               return (
-                                <div key={clip} className="bg-red-950/30 border border-red-900/60 rounded-xl p-3 flex flex-col gap-1">
-                                  <p className="text-[11px] font-mono text-red-400 font-semibold">Clip {clip} Failed</p>
-                                  <p className="text-[10px] text-red-300/70 font-mono break-all leading-relaxed">{err}</p>
+                                <div key={clip} className="bg-red-950/30 border border-red-900/60 rounded-xl p-3 flex flex-col gap-2 col-span-2 sm:col-span-1">
+                                  <p className="text-xs font-mono text-red-400 font-semibold">Clip {clip} Failed</p>
+                                  <p className="text-[11px] text-red-300 font-mono break-all leading-relaxed whitespace-pre-wrap">{err}</p>
                                 </div>
                               )
                             }
