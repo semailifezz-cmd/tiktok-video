@@ -11,7 +11,11 @@ export async function GET(
   try {
     const { state, resultUrls, failReason } = await pollTask(jobId)
 
-    if (state === 'success' && resultUrls.length > 0) {
+    if (state === 'success') {
+      if (resultUrls.length === 0) {
+        // URL not populated yet — keep polling rather than treating as a failure
+        return NextResponse.json({ status: 'processing', state: 'success_pending_url' })
+      }
       const rawUrl = resultUrls[0]
       const filename = `videos/${jobId}.mp4`
       const url = await persistUrl(rawUrl, filename)
@@ -19,10 +23,12 @@ export async function GET(
     }
 
     if (state === 'fail') {
-      return NextResponse.json({ status: 'failed', reason: failReason ?? 'Kie.ai reported failure (no reason given)' })
+      const reason = failReason ?? 'Kie.ai reported failure (no reason given)'
+      console.error(`[video poll] ${jobId} failed:`, reason)
+      return NextResponse.json({ status: 'failed', reason })
     }
 
-    return NextResponse.json({ status: 'processing' })
+    return NextResponse.json({ status: 'processing', state })
   } catch (err) {
     return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 })
   }

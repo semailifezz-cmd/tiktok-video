@@ -134,23 +134,45 @@ Output a JSON array of exactly 4 scene objects:
     "venue_used": "Exact Venue Name from the list above",
     "props_used": [],
     "character_expressions": {
-      "Name1": "Pixar-style exaggerated expression — describe the large eyes (drooping, wide, glassy, narrow), brow position, mouth shape, cheek position. Example: 'Eyes cast downward with heavy lids, brows pulled together in a sad arch. Lower lip slightly trembles. The oversized banana head tilts forward in shame.'"
+      "Name1": "Pixar-style exaggerated expression — describe the large eyes (drooping, wide, glassy, narrow), brow position, mouth shape, cheek position. NEVER use abstract emotion words ('sad', 'nervous', 'happy') — describe physical features only: eye state, brow position, mouth shape, body lean or tilt. Example: 'Eyes cast downward with heavy lids, brows pulled together in a tight arch. Lower lip slightly trembles. The oversized banana head tilts forward, chin nearly touching the chest.'"
     },
-    "character_actions": {
-      "Name1": "Precise physical actions: posture, hand/arm position, movement. Example: 'Shuffles forward slowly, backpack slumping off one shoulder. Both hands grip the counter edge. Feet in worn flip flops shuffle on the checkered tile floor.'"
-    },
+    "action_timeline": "The scene narrative broken into three 5-second beats. Each beat describes the whole situation — what is happening in the space, how all characters and the environment relate. Characters are details within the scene, not separate tracks. Use smooth, continuous motion verbs: 'gradually,' 'slowly,' 'eases,' 'flows into,' 'drifts.' AVOID: 'suddenly,' 'jerks,' 'rapidly,' 'cuts to.' The 10s-15s beat MUST end on a held, motionless pose — this is the last frame and the handoff point for the next clip. Format: '0s-5s: [full scene situation with all characters as details]. 5s-10s: [full scene situation]. 10s-15s: [full scene situation — end on a held, visually strong frame].' Example: '0s-5s: Marco shuffles through the door, backpack slumped low on his shoulders. Sofia, behind the register, goes still when she sees him — her expression sharpens into quiet contempt. The other customers carry on, oblivious. 5s-10s: Marco steps to the counter and holds out his order slip. Sofia glances at it, then at him, then slowly lets it fall to the counter without touching it — tilting her head toward the exit. 10s-15s: Marco stands frozen, the slip untouched between them. Sofia has turned to the next customer, her back to him, as if he never existed — held still.'",
     "camera_angle": "Specific shot type — e.g. 'Low-angle medium shot looking up at the strawberry cashier, emphasising her confident dominance over the banana protagonist'",
     "camera_movement": "Camera motion — e.g. 'Static wide establishing shot, then slow dolly-push to a close-up on the banana protagonist face'",
     "atmosphere": "Overall mood: crowd behaviour, spatial relationships, symbolic staging that reinforces the formula step",
-    "color_ambience": "Pixar color palette — e.g. 'Warm golden-amber fills the diner interior. Protagonist is slightly cooler-toned, visually isolated from the warm confident figures around him.'",
-    "raw_prompt": "Complete 4–6 sentence Pixar-style 3D cinematic video prompt for 9:16 vertical TikTok format. Describe the venue, character actions, expressions, camera work, atmosphere, and color in one fluid description. Reference characters by NAME ONLY. Explicitly mention: Pixar-style 3D animation, anthropomorphic fruit characters, warm cinematic lighting, 9:16 vertical."
+    "color_ambience": "Pixar color palette — MUST be IDENTICAL across all 4 clips. Define it in Clip 1, copy word-for-word to Clips 2/3/4. e.g. 'Warm golden-amber fills the diner interior. Protagonist is slightly cooler-toned, visually isolated from the warm confident figures around him.'",
+    "clip_bridge": "REQUIRED for Clips 1/2/3. One sentence describing the EXACT physical state and screen position of every character at the END of this clip's 10s–15s beat. This is the last frame — the next clip opens from this exact state. e.g. 'Marco stands frozen near the entrance, head bowed, both hands gripping his backpack straps. Sofia has turned away, back to camera, arms crossed behind the register.'",
+    "raw_prompt": "SETTING: [Pixar 3D interior name, key props, lighting quality — e.g. 'Warm Pixar 3D fast-food interior, checkered floor, pendant lamps casting golden light']\nCHARACTERS: [Who is present by NAME ONLY and where they stand — e.g. 'Marco stands at the counter, shoulders hunched. Sofia stands behind the register, arms crossed.']\nACTION: [Timeline of events — '0s–5s: [setup]. 5s–10s: [main event]. 10s–15s: [reaction/hold].' Example: '0s–5s: Marco enters and freezes at the sight of Sofia. 5s–10s: He slowly reaches for the menu board with a trembling hand. 10s–15s: Sofia gradually turns away, ignoring him — held still.']\nCAMERA: [Shot type + movement — e.g. 'Low-angle medium shot, slow dolly-push toward Marco's face ending in a close-up on his expression.']\nSTYLE: Pixar-style 3D animation, anthropomorphic fruit characters, warm cinematic lighting, smooth fluid motion, no sudden cuts, 9:16 vertical TikTok format"
   }
 ]
+
+VISUAL COHERENCE — these 4 clips must stitch into one seamless 60-second episode:
+
+Venue lock: All 4 clips use the EXACT same venue_used string. Only change venue if the formula explicitly specifies a location move.
+
+Color lock: Define color_ambience once in Clip 1. Copy it word-for-word into Clips 2, 3, and 4. The color palette NEVER shifts mid-episode.
+
+Lighting lock: The atmosphere field must describe the same lighting quality across all 4 clips — same warmth, same shadows, same ambient tone.
+
+Character state chain: The 10s–15s beat of each clip is a held position. The 0s–5s beat of the NEXT clip opens from that exact position. Your clip_bridge captures this handoff. Write the clip_bridges first, then write character_actions to match them.
+
+Camera arc across the episode:
+  - Clip 1 (Establish): Wide shot → slow push in. Introduce the full space and mood.
+  - Clip 2 (React): Medium shot → close-up. Faces, emotion, the reveal.
+  - Clip 3 (Turn): Close-up confrontation → pull back to medium. The shift of power.
+  - Clip 4 (Exit): Medium → wide. Resolution, characters depart, space breathes again.
 
 Strict rules:
 - Clip 1 → Formula Step 1, Clip 2 → Step 2, Clip 3 → Step 3, Clip 4 → Step 4
 - ONLY reference characters by name — never describe their fruit type or appearance (reference images handle that)
-- character_expressions and character_actions must cover every name in characters_used
-- raw_prompt must explicitly state the Pixar 3D art style
+- character_expressions must cover every name in characters_used
+- action_timeline MUST use three beats: 0s-5s / 5s-10s / 10s-15s — written as whole-scene narrative, not per-character lists
+- action_timeline 0s-5s beat of Clip 2/3/4 MUST pick up from the physical state described in the previous clip's clip_bridge
+- ALL 4 clips MUST have identical venue_used
+- ALL 4 clips MUST have identical color_ambience
+- clip_bridge is REQUIRED on Clips 1, 2, and 3 (Clip 4 needs no bridge — it is the final shot)
+- raw_prompt MUST use all 5 labeled parts in order: SETTING / CHARACTERS / ACTION / CAMERA / STYLE — each on its own line, colon after the label
+- raw_prompt ACTION MUST include the three-beat timeline: 0s–5s / 5s–10s / 10s–15s
+- action_timeline and raw_prompt ACTION verbs must be smooth and gradual — use 'gradually,' 'slowly,' 'eases,' 'flows into,' 'drifts.' NEVER use 'suddenly,' 'jerks,' 'rapidly,' or 'cuts to'
 - segment_duration must match: Clip 1 → "0–15s", Clip 2 → "15–30s", Clip 3 → "30–45s", Clip 4 → "45–60s"`
 }

@@ -76,6 +76,8 @@ export interface ScenePrompt {
   atmosphere?: string
   color_ambience?: string
   raw_prompt: string
+  action_timeline?: string
+  clip_bridge?: string
   final_prompt?: string
   grok_ref_images?: string[]
   video_job_id?: string

@@ -1,3 +1,10 @@
 {
-  "name": "tiktok-video"
+  "name": "tiktok-video",
+  "functions": {
+    "app/api/images/[jobId]/route.ts": { "maxDuration": 60 },
+    "app/api/videos/route.ts":         { "maxDuration": 60 },
+    "app/api/videos/[jobId]/route.ts": { "maxDuration": 60 },
+    "app/api/bible/route.ts":          { "maxDuration": 60 },
+    "app/api/scripts/route.ts":        { "maxDuration": 60 }
+  }
 }

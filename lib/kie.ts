@@ -50,13 +50,26 @@ export async function pollTask(taskId: string): Promise<PollResult> {
   if (data.code !== 200) throw new Error(`Kie.ai poll error ${data.code}: ${data.msg}`)
 
   const task = data.data
+  // Kie.ai uses `state` but defensively also check `status`
+  const rawState: string = task.state ?? task.status ?? 'unknown'
   let resultUrls: string[] = []
   let failReason: string | undefined
 
   if (task.resultJson) {
     try {
       const parsed = JSON.parse(task.resultJson)
-      resultUrls = parsed.resultUrls ?? []
+      // Handle multiple possible URL field formats across Kie.ai models
+      if (Array.isArray(parsed.resultUrls)) {
+        resultUrls = parsed.resultUrls
+      } else if (Array.isArray(parsed.images)) {
+        resultUrls = parsed.images.map((img: { url?: string } | string) =>
+          typeof img === 'string' ? img : (img.url ?? '')
+        ).filter(Boolean)
+      } else if (Array.isArray(parsed.urls)) {
+        resultUrls = parsed.urls
+      } else if (typeof parsed.url === 'string') {
+        resultUrls = [parsed.url]
+      }
       // Surface any error field from resultJson
       failReason =
         parsed.errorMsg ||
@@ -67,13 +80,14 @@ export async function pollTask(taskId: string): Promise<PollResult> {
         undefined
     } catch {
       // resultJson is not valid JSON — use raw value as the error message
-      if (task.state === 'fail') failReason = `resultJson parse error: ${String(task.resultJson).slice(0, 200)}`
+      if (rawState === 'fail') failReason = `resultJson parse error: ${String(task.resultJson).slice(0, 200)}`
     }
   }
 
   // Fall back to top-level task fields
   if (!failReason) {
     failReason =
+      task.failMsg ||
       task.errorMsg ||
       task.failReason ||
       task.message ||
@@ -83,11 +97,11 @@ export async function pollTask(taskId: string): Promise<PollResult> {
   }
 
   // Final fallback: include the full raw task object so nothing is silently swallowed
-  if (!failReason && task.state === 'fail') {
-    failReason = `Kie.ai state=fail (no reason provided). Raw task: ${JSON.stringify(task).slice(0, 400)}`
+  if (!failReason && rawState === 'fail') {
+    failReason = `Kie.ai state=fail (no reason). Raw: ${JSON.stringify(task)}`
   }
 
-  return { state: task.state as KieState, resultUrls, failReason }
+  return { state: rawState as KieState, resultUrls, failReason }
 }
 
 export async function submitImageJob(prompt: string): Promise<string> {
@@ -119,6 +133,7 @@ export async function submitVideoJob(payload: {
       resolution: payload.resolution,
     })
   }
+  // text-to-video requires duration as a number (docs: "duration: number, 6-30")
   return createTask('grok-imagine/text-to-video', {
     prompt: payload.prompt,
     mode: 'normal',

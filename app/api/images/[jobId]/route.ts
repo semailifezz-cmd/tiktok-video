@@ -11,7 +11,13 @@ export async function GET(
   try {
     const { state, resultUrls, failReason } = await pollTask(jobId)
 
-    if (state === 'success' && resultUrls.length > 0) {
+    if (state === 'success') {
+      if (resultUrls.length === 0) {
+        return NextResponse.json({
+          status: 'failed',
+          reason: 'Kie.ai returned success state but resultJson contained no URLs',
+        })
+      }
       const rawUrl = resultUrls[0]
       const filename = `images/${jobId}.jpg`
       const image_url = await persistUrl(rawUrl, filename)
@@ -25,7 +31,7 @@ export async function GET(
       })
     }
 
-    return NextResponse.json({ status: 'processing' })
+    return NextResponse.json({ status: 'processing', state })
   } catch (err) {
     return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 })
   }

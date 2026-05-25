@@ -11,10 +11,11 @@ function extractArray(raw: string): string | null {
 }
 
 function sanitizeJson(s: string): string {
-  return s.replace(/[ -]/g, c => {
-    const map: Record<string, string> = { '\n': '\\n', '\r': '\\r', '\t': '\\t' }
-    return map[c] ?? `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`
-  })
+  return s
+    .replace(/\r\n/g, '\\n')
+    .replace(/\r/g, '\\n')
+    .replace(/\n/g, '\\n')
+    .replace(/\t/g, '\\t')
 }
 
 function parseContext(json: string, err: SyntaxError): string {

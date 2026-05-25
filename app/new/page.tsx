@@ -45,6 +45,65 @@ export default function NewSeries() {
     episode_formula: DEFAULT_FORMULA,
   })
   const [submitting, setSubmitting] = useState(false)
+  const [generating, setGenerating] = useState(false)
+  const [generateProgress, setGenerateProgress] = useState(0)
+  const [generateStatus, setGenerateStatus] = useState('')
+  const [generatingPlot, setGeneratingPlot] = useState(false)
+  const [generatePlotStatus, setGeneratePlotStatus] = useState('')
+
+  const handleGenerate = async () => {
+    setGenerating(true)
+    setGenerateProgress(5)
+    setGenerateStatus('Calling Gemini to design a new series concept…')
+    const timer = setInterval(() => {
+      setGenerateProgress(prev => {
+        if (prev >= 85) { clearInterval(timer); return 85 }
+        return prev + 3
+      })
+    }, 400)
+    try {
+      const res = await fetch('/api/generate-premise', { method: 'POST' })
+      const data = await res.json()
+      if (data.error) throw new Error(data.error)
+      clearInterval(timer)
+      setGenerateProgress(100)
+      setGenerateStatus('✓ Series concept generated!')
+      setForm(prev => ({
+        ...prev,
+        ...(data.series_title && { series_title: data.series_title }),
+        ...(data.genre && { genre: data.genre }),
+        ...(data.setting_era && { setting_era: data.setting_era }),
+        ...(data.tone && { tone: data.tone }),
+        ...(data.core_conflict && { core_conflict: data.core_conflict }),
+      }))
+    } catch (err) {
+      clearInterval(timer)
+      setGenerateProgress(0)
+      setGenerateStatus(`Error: ${err instanceof Error ? err.message : 'Generation failed'}`)
+    } finally {
+      setGenerating(false)
+      setTimeout(() => { setGenerateProgress(0); setGenerateStatus('') }, 3000)
+    }
+  }
+
+  const handleGeneratePlot = async () => {
+    setGeneratingPlot(true)
+    setGeneratePlotStatus('Generating a new plot variation…')
+    try {
+      const res = await fetch('/api/generate-formula', { method: 'POST' })
+      const data = await res.json()
+      if (data.error) throw new Error(data.error)
+      if (data.episode_formula) {
+        setForm(prev => ({ ...prev, episode_formula: data.episode_formula }))
+        setGeneratePlotStatus('✓ New plot ready!')
+      }
+    } catch (err) {
+      setGeneratePlotStatus(`Error: ${err instanceof Error ? err.message : 'Generation failed'}`)
+    } finally {
+      setGeneratingPlot(false)
+      setTimeout(() => setGeneratePlotStatus(''), 3000)
+    }
+  }
 
   const set = (field: string) =>
     (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) =>
@@ -125,12 +184,34 @@ export default function NewSeries() {
         <form onSubmit={handleSubmit} className="pb-24 space-y-6">
           {/* 01 — Universe Prompt */}
           <div className="bg-zinc-900/40 border border-zinc-800 rounded-xl p-6">
-            <div className="mb-5">
-              <p className="font-mono text-[11px] tracking-widest uppercase text-zinc-500">01 — Universe Prompt</p>
-              <p className="text-sm text-zinc-600 mt-1">
-                Everything downstream — characters, venues, scripts, videos — is derived from this.
-              </p>
+            <div className="mb-5 flex items-start justify-between gap-4">
+              <div>
+                <p className="font-mono text-[11px] tracking-widest uppercase text-zinc-500">01 — Universe Prompt</p>
+                <p className="text-sm text-zinc-600 mt-1">
+                  Everything downstream — characters, venues, scripts, videos — is derived from this.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleGenerate}
+                disabled={generating || submitting}
+                className="flex-shrink-0 flex items-center gap-1.5 bg-pink-950/40 hover:bg-pink-950/60 disabled:opacity-50 border border-pink-900/50 text-pink-400 text-xs px-3 py-2 rounded-lg transition-colors font-mono whitespace-nowrap"
+              >
+                {generating ? <span className="animate-spin inline-block">◌</span> : '✦'}
+                {generating ? 'Generating…' : 'Generate Premise'}
+              </button>
             </div>
+            {(generating || generateStatus) && (
+              <div className="mb-4 space-y-1.5">
+                <div className="h-1 bg-zinc-800 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-pink-600 rounded-full transition-all duration-300"
+                    style={{ width: `${generateProgress}%` }}
+                  />
+                </div>
+                <p className="text-xs text-zinc-500 font-mono">{generateStatus}</p>
+              </div>
+            )}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
               <div>
                 <label className={labelClass}>Series Title *</label>
@@ -179,12 +260,26 @@ export default function NewSeries() {
 
           {/* 02 — Episode Formula */}
           <div className="bg-zinc-900/40 border border-zinc-800 rounded-xl p-6">
-            <div className="mb-4">
-              <p className="font-mono text-[11px] tracking-widest uppercase text-zinc-500">02 — Episode Formula</p>
-              <p className="text-sm text-zinc-600 mt-1">
-                The 4-step drama arc applied to every episode. Follows the Bananito / fruit drama format.
-              </p>
+            <div className="mb-4 flex items-start justify-between gap-4">
+              <div>
+                <p className="font-mono text-[11px] tracking-widest uppercase text-zinc-500">02 — Episode Formula</p>
+                <p className="text-sm text-zinc-600 mt-1">
+                  The 4-step drama arc applied to every episode. Follows the Bananito / fruit drama format.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleGeneratePlot}
+                disabled={generatingPlot || submitting}
+                className="flex-shrink-0 flex items-center gap-1.5 bg-zinc-800/60 hover:bg-zinc-800 disabled:opacity-50 border border-zinc-700 text-zinc-400 text-xs px-3 py-2 rounded-lg transition-colors font-mono whitespace-nowrap"
+              >
+                {generatingPlot ? <span className="animate-spin inline-block">◌</span> : '↺'}
+                {generatingPlot ? 'Generating…' : 'New Plot'}
+              </button>
             </div>
+            {generatePlotStatus && (
+              <p className="text-xs text-zinc-500 font-mono mb-3">{generatePlotStatus}</p>
+            )}
             <div className="mb-3 flex flex-wrap gap-2">
               {['Step 1 → Clip 1 (0–15s)', 'Step 2 → Clip 2 (15–30s)', 'Step 3 → Clip 3 (30–45s)', 'Step 4 → Clip 4 (45–60s)'].map(s => (
                 <span key={s} className="font-mono text-[11px] px-2 py-1 bg-zinc-800/60 border border-zinc-700 rounded text-zinc-500">{s}</span>

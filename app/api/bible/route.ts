@@ -3,19 +3,21 @@ import { callGrok } from '@/lib/xai'
 import { BIBLE_SYSTEM_PROMPT, buildBiblePrompt } from '@/lib/prompts'
 import type { UniversePrompt } from '@/lib/types'
 
-function extractJson(raw: string): string | null {
+function extractJson(raw: string): { json: string } | { error: string } {
   const start = raw.indexOf('{')
+  if (start === -1) return { error: `No JSON object found. Response starts with: "${raw.slice(0, 200)}"` }
   const end = raw.lastIndexOf('}')
-  if (start === -1 || end === -1 || end <= start) return null
-  return raw.slice(start, end + 1)
+  if (end === -1 || end <= start) {
+    return {
+      error:
+        `JSON object was truncated — starts with "{" but has no closing "}". ` +
+        `This usually means the model ran out of output tokens. ` +
+        `Try reducing the number of episodes. First 300 chars: "${raw.slice(0, 300)}"`,
+    }
+  }
+  return { json: raw.slice(start, end + 1) }
 }
 
-function sanitizeJson(s: string): string {
-  return s.replace(/[ -]/g, c => {
-    const map: Record<string, string> = { '\n': '\\n', '\r': '\\r', '\t': '\\t' }
-    return map[c] ?? `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`
-  })
-}
 
 function parseContext(json: string, err: SyntaxError): string {
   const posMatch = err.message.match(/position (\d+)/)
@@ -47,31 +49,24 @@ export async function POST(req: NextRequest) {
         { role: 'system', content: BIBLE_SYSTEM_PROMPT },
         { role: 'user', content: userPrompt },
       ],
-      { temperature: 0.85, maxTokens: 32768 }
+      { temperature: 0.85, maxTokens: 16384, responseFormat: 'json_object' }
     )
 
     const extracted = extractJson(raw)
-    if (!extracted) {
-      return NextResponse.json(
-        { error: `Gemini returned no JSON object. Response starts with: "${raw.slice(0, 300)}"` },
-        { status: 500 }
-      )
+    if ('error' in extracted) {
+      return NextResponse.json({ error: extracted.error }, { status: 500 })
     }
 
     let bible
     try {
-      bible = JSON.parse(extracted)
+      bible = JSON.parse(extracted.json)
     } catch (e1) {
-      try {
-        bible = JSON.parse(sanitizeJson(extracted))
-      } catch (e2) {
-        const err = e2 instanceof SyntaxError ? e2 : e1 instanceof SyntaxError ? e1 : null
-        const context = err ? parseContext(sanitizeJson(extracted), err) : extracted.slice(0, 300)
-        return NextResponse.json(
-          { error: `Series bible JSON parse error — ${err?.message ?? 'unknown'}. Context: "${context}"` },
-          { status: 500 }
-        )
-      }
+      const err = e1 instanceof SyntaxError ? e1 : null
+      const context = err ? parseContext(extracted.json, err) : extracted.json.slice(0, 300)
+      return NextResponse.json(
+        { error: `Series bible JSON parse error — ${err?.message ?? 'unknown'}. Context: "${context}"` },
+        { status: 500 }
+      )
     }
 
     return NextResponse.json(bible)

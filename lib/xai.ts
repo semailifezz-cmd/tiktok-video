@@ -3,10 +3,22 @@ const KIE_LLM_BASE = 'https://api.kie.ai/gemini-2.5-flash/v1'
 
 export async function callGrok(
   messages: Array<{ role: 'user' | 'assistant' | 'system'; content: string }>,
-  options: { temperature?: number; maxTokens?: number } = {}
+  options: { temperature?: number; maxTokens?: number; responseFormat?: 'json_object' | 'text' } = {}
 ): Promise<string> {
   const apiKey = process.env.KIE_API_KEY
   if (!apiKey) throw new Error('KIE_API_KEY not configured. Add it to .env.local or Vercel env vars.')
+
+  const body: Record<string, unknown> = {
+    model: 'gemini-2.5-flash',
+    messages,
+    stream: false,
+    temperature: options.temperature ?? 0.8,
+    max_tokens: options.maxTokens ?? 16384,
+  }
+
+  if (options.responseFormat) {
+    body.response_format = { type: options.responseFormat }
+  }
 
   const response = await fetch(`${KIE_LLM_BASE}/chat/completions`, {
     method: 'POST',
@@ -14,13 +26,7 @@ export async function callGrok(
       'Authorization': `Bearer ${apiKey}`,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({
-      model: 'gemini-2.5-flash',
-      messages,
-      stream: false,
-      temperature: options.temperature ?? 0.8,
-      max_tokens: options.maxTokens ?? 32768,
-    }),
+    body: JSON.stringify(body),
   })
 
   if (!response.ok) {
@@ -36,9 +42,18 @@ export async function callGrok(
   if (!data.choices || data.choices.length === 0) {
     throw new Error(`Gemini returned no choices. Full response: ${JSON.stringify(data).slice(0, 500)}`)
   }
-  if (!data.choices[0].message?.content) {
-    throw new Error(`Gemini choice has no content. Choice: ${JSON.stringify(data.choices[0]).slice(0, 300)}`)
+
+  const choice = data.choices[0]
+  if (!choice.message?.content) {
+    throw new Error(`Gemini choice has no content. Choice: ${JSON.stringify(choice).slice(0, 300)}`)
   }
 
-  return data.choices[0].message.content
+  if (choice.finish_reason === 'length') {
+    throw new Error(
+      `Gemini output was truncated (finish_reason=length) — the JSON was cut off before closing. ` +
+      `Try reducing total_episodes or simplifying the series bible.`
+    )
+  }
+
+  return choice.message.content
 }
