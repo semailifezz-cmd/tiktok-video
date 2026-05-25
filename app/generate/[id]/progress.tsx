@@ -279,12 +279,9 @@ export default function Progress({ id }: { id: string }) {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ bible: currentBible, episodeNum: cont.ep_num, formula: form.episode_formula, continuityMemo: contMemo }),
         })
-        if (!outlineRes.ok) {
-          const err = await outlineRes.json()
-          throw new Error(err.error ?? 'Episode outline generation failed')
-        }
-        const outline: EpisodeOutline = await outlineRes.json()
-        if ((outline as any).error) throw new Error((outline as any).error)
+        const outlineJson = await tryJson(outlineRes)
+        if (!outlineRes.ok || outlineJson.error) throw new Error(outlineJson.error ?? 'Episode outline generation failed')
+        const outline: EpisodeOutline = outlineJson
 
         currentBible = { ...currentBible, episodes: [...currentBible.episodes, outline] }
         setBible(currentBible)
@@ -300,8 +297,8 @@ export default function Progress({ id }: { id: string }) {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(form),
         })
-        const bibleJson = await bibleRes.json()
-        if (bibleJson.error) throw new Error(bibleJson.error)
+        const bibleJson = await tryJson(bibleRes)
+        if (!bibleRes.ok || bibleJson.error) throw new Error(bibleJson.error ?? `Bible generation HTTP ${bibleRes.status}`)
         currentBible = bibleJson
         setBible(currentBible)
         setPhase(0, 'done', `${currentBible.characters.length} fruit characters · ${currentBible.venues.length} venues · ${currentBible.episodes.length} episodes`, 100)
@@ -426,12 +423,8 @@ export default function Progress({ id }: { id: string }) {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ episode, bible: currentBible, formula: form.episode_formula, prevMemo }),
         })
-        if (!scriptRes.ok) {
-          const err = await scriptRes.json()
-          throw new Error(err.error ?? 'Script generation failed')
-        }
-        const script = await scriptRes.json()
-        if (script.error) throw new Error(script.error)
+        const script = await tryJson(scriptRes)
+        if (!scriptRes.ok || script.error) throw new Error(script.error ?? `Script generation HTTP ${scriptRes.status}`)
         allScripts.push(script)
         setScripts([...allScripts])
         prevMemo = buildContinuityMemo(episode)
