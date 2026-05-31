@@ -45,7 +45,7 @@ Return a single JSON object:
   "key_plot_points": "Specific drama beats that map to the 4 formula steps for this episode"
 }
 
-CRITICAL: characters_featured must contain EXACTLY 2 character names — no more, no fewer. Video generation fails with 3+ characters in the same scene. Choose the 2 most dramatically important characters for this episode.``
+CRITICAL: characters_featured must contain EXACTLY 2 character names — no more, no fewer. Video generation fails with 3+ characters in the same scene. Choose the 2 most dramatically important characters for this episode.`
 
   try {
     const raw = await callGrok(
