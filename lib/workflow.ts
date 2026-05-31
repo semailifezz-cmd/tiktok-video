@@ -19,23 +19,16 @@ export function buildContinuityMemo(episode: EpisodeOutline): string {
 export function buildVideoPrompt(scene: ScenePrompt, prevClipBridge?: string): string {
   const parts: string[] = []
 
-  // Clip position and duration marker
+  // Duration marker (opener — informs the model of clip length)
   parts.push(`Clip ${scene.clip_num} of 4, 15-second single-take clip`)
 
-  // Scene context: venue, color, atmosphere
-  if (scene.venue_used) parts.push(`in ${scene.venue_used}`)
-  if (scene.color_ambience) parts.push(scene.color_ambience)
-  if (scene.atmosphere) parts.push(scene.atmosphere)
-
-  // Continuity anchor: the exact last frame of the previous clip
-  if (prevClipBridge) {
-    parts.push(`continuing from: ${prevClipBridge}`)
+  // SUBJECT — who is in the scene (front-loaded: model weights early tokens most)
+  if (scene.characters_used.length > 0) {
+    parts.push(scene.characters_used.join(' and '))
   }
 
-  // Motion quality signal before action so the model primes for smooth generation
+  // ACTION — one smooth narrative arc; signal smooth motion before the content
   parts.push('smooth fluid motion, single unbroken take')
-
-  // Scene narrative beats — whole-scene description per timeframe; fall back to per-character if missing
   if (scene.action_timeline) {
     parts.push(scene.action_timeline)
   } else {
@@ -45,10 +38,24 @@ export function buildVideoPrompt(scene: ScenePrompt, prevClipBridge?: string): s
     }
   }
 
+  // ENVIRONMENT — venue, color palette, atmosphere
+  if (scene.venue_used) parts.push(`in ${scene.venue_used}`)
+  if (scene.color_ambience) parts.push(scene.color_ambience)
+  if (scene.atmosphere) parts.push(scene.atmosphere)
+
+  // Continuity anchor: last-frame state of the previous clip
+  if (prevClipBridge) parts.push(`continuing from: ${prevClipBridge}`)
+
+  // CAMERA — shot type then one primary movement
   if (scene.camera_angle) parts.push(scene.camera_angle)
   if (scene.camera_movement) parts.push(scene.camera_movement)
 
-  // Style at end — reinforces aesthetic after all narrative content is processed
+  // LIGHTING — explicit dedicated line; single biggest quality lever
+  if (scene.scene_lighting) {
+    parts.push(scene.scene_lighting)
+  }
+
+  // STYLE — always last; reinforces aesthetic after all narrative content
   parts.push('Pixar-style 3D animation, anthropomorphic fruit characters, warm cinematic lighting, 9:16 vertical TikTok format')
 
   return parts

@@ -73,6 +73,7 @@ export interface ScenePrompt {
   character_actions?: Record<string, string>
   camera_angle?: string
   camera_movement?: string
+  scene_lighting?: string
   atmosphere?: string
   color_ambience?: string
   raw_prompt: string
