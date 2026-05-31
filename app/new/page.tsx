@@ -38,7 +38,7 @@ export default function NewSeries() {
     setting_era: 'Contemporary USA, 2024',
     core_conflict: 'A poor banana man is humiliated daily by the beautiful strawberry cashier at his local fast food restaurant — until the day fate reveals he is heir to a vast empire and far beyond her reach.',
     tone: 'Warm, cinematic, emotionally charged, Pixar-style 3D animation',
-    main_characters: 'LLM to design (3–5)',
+    main_characters: 'LLM to design (2–3)',
     total_episodes: 5,
     episode_length_s: 60,
     clip_length_s: 15,
@@ -238,12 +238,11 @@ export default function NewSeries() {
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className={labelClass}>Main Characters</label>
+                <label className={labelClass}>Main Characters <span className="text-zinc-600">(max 2 per scene)</span></label>
                 <select value={form.main_characters} onChange={set('main_characters')} className={inputClass}>
-                  <option>LLM to design (3–5)</option>
+                  <option>LLM to design (2–3)</option>
+                  <option>2 characters</option>
                   <option>3 characters</option>
-                  <option>4 characters</option>
-                  <option>5 characters</option>
                 </select>
               </div>
               <div>

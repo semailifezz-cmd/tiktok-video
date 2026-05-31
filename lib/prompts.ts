@@ -80,7 +80,8 @@ Requirements:
 - Create 2-3 recurring props
 - Generate all ${input.total_episodes} episode outlines
 - Every episode must map to the formula (Step 1 = Clip 1, Step 2 = Clip 2, etc.)
-- Keep character descriptions specific enough for consistent 3D image generation`
+- Keep character descriptions specific enough for consistent 3D image generation
+- CRITICAL: Each episode's characters_featured must list EXACTLY 2 characters — no more. Video generation breaks with 3+ characters in the same scene. Design scenes so only 2 characters appear at a time.`
 }
 
 export const SCRIPT_SYSTEM_PROMPT = `You are a professional drama screenwriter and cinematographer specialising in Pixar-style anthropomorphic fruit character stories. Your response must be a raw JSON array and nothing else — no greeting, no explanation, no markdown, no code fences. Start your response with [ and end with ]. Any text outside the JSON array will break the pipeline.`
@@ -130,7 +131,7 @@ Output a JSON array of exactly 4 scene objects:
     "clip_num": 1,
     "formula_step": 1,
     "segment_duration": "0–15s",
-    "characters_used": ["Name1"],
+    "characters_used": ["Name1", "Name2 (MAXIMUM 2 — never list 3 or more)"],
     "venue_used": "Exact Venue Name from the list above",
     "props_used": [],
     "character_expressions": {
