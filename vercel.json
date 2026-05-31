@@ -1,10 +1,13 @@
 {
   "name": "tiktok-video",
   "functions": {
-    "app/api/bible/route.ts":          { "maxDuration": 300 },
-    "app/api/scripts/route.ts":        { "maxDuration": 300 },
-    "app/api/images/[jobId]/route.ts": { "maxDuration": 300 },
-    "app/api/videos/route.ts":         { "maxDuration": 300 },
-    "app/api/videos/[jobId]/route.ts": { "maxDuration": 300 }
+    "app/api/bible/route.ts":                { "maxDuration": 300 },
+    "app/api/scripts/route.ts":              { "maxDuration": 300 },
+    "app/api/episode-outline/route.ts":      { "maxDuration": 300 },
+    "app/api/generate-premise/route.ts":     { "maxDuration": 60 },
+    "app/api/generate-formula/route.ts":     { "maxDuration": 60 },
+    "app/api/images/[jobId]/route.ts":       { "maxDuration": 300 },
+    "app/api/videos/route.ts":               { "maxDuration": 300 },
+    "app/api/videos/[jobId]/route.ts":       { "maxDuration": 300 }
   }
 }

@@ -4,6 +4,11 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { upsertSeriesEntry } from '@/lib/store'
 
+async function tryJson(res: Response): Promise<any> {
+  const text = await res.text()
+  try { return JSON.parse(text) } catch { return { error: text.slice(0, 500) || `HTTP ${res.status}` } }
+}
+
 const DEFAULT_FORMULA = `Step 1 — Humiliation at the Counter (0–15s / Clip 1)
 Setting: A warm Pixar-style fast food restaurant or coffee shop. Checkered floor, pendant lights, cozy American diner interior.
 Plot: The protagonist (a scraggly, poor-looking fruit character in torn clothes) approaches the counter. The attractive fruit cashier looks him up and down with contempt — scoffs, refuses service, or mocks him loudly in front of other customers.
@@ -63,8 +68,8 @@ export default function NewSeries() {
     }, 400)
     try {
       const res = await fetch('/api/generate-premise', { method: 'POST' })
-      const data = await res.json()
-      if (data.error) throw new Error(data.error)
+      const data = await tryJson(res)
+      if (!res.ok || data.error) throw new Error(data.error ?? `HTTP ${res.status}`)
       clearInterval(timer)
       setGenerateProgress(100)
       setGenerateStatus('✓ Series concept generated!')
@@ -91,8 +96,8 @@ export default function NewSeries() {
     setGeneratePlotStatus('Generating a new plot variation…')
     try {
       const res = await fetch('/api/generate-formula', { method: 'POST' })
-      const data = await res.json()
-      if (data.error) throw new Error(data.error)
+      const data = await tryJson(res)
+      if (!res.ok || data.error) throw new Error(data.error ?? `HTTP ${res.status}`)
       if (data.episode_formula) {
         setForm(prev => ({ ...prev, episode_formula: data.episode_formula }))
         setGeneratePlotStatus('✓ New plot ready!')
